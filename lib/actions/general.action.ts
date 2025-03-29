@@ -2,10 +2,33 @@
 
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
+import Vapi from "@vapi-ai/web";
 import { db } from "@/firebase/admin";
 import { feedbackSchema } from "@/constants";
 import { getResumeContent } from "@/lib/vapi.sdk";
 import { vapiService } from "@/lib/vapi.sdk";
+
+const vapi = new Vapi(process.env.VAPI_API_KEY!);
+
+async function getVapiFile(fileId: string) {
+  try {
+    const response = await fetch(`https://api.vapi.ai/file/${fileId}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.VAPI_API_KEY}`,
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch file');
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching file:', error);
+    return null;
+  }
+}
 
 export async function createInterview(params: {
   userId: string;
@@ -14,66 +37,26 @@ export async function createInterview(params: {
   techstack: string[];
 }) {
   try {
-    // Get user data including VAPI file ID
+    // Get user data including VAPI IDs
     const userDoc = await db.collection("users").doc(params.userId).get();
     const userData = userDoc.data();
     
-    // Get resume content if available
-    let resumeContent = null;
-    if (userData?.vapiFileId) {
-      resumeContent = await getResumeContent(userData.vapiFileId);
-    }
-
-    // Create VAPI assistant with resume context
-    const assistant = await vapiService.createAssistant({
-      name: "Technical Interviewer",
-      model: "gpt-4",
-      tools: [{
-        type: "knowledge_base",
-        knowledge_base_id: userData?.vapiFileId
-      }],
-      instructions: `
-        You are a technical interviewer conducting a ${params.type} interview for a ${params.role} position.
-        Focus on these technologies: ${params.techstack.join(', ')}.
-        ${resumeContent ? 'Use the candidate\'s resume to personalize questions and discussions.' : ''}
-        Be professional, thorough, and evaluate responses carefully.
-      `
-    });
-
-    // Create interview in database
+    // Create the interview with VAPI context
     const interviewRef = await db.collection("interviews").add({
       userId: params.userId,
       type: params.type,
       role: params.role,
       techstack: params.techstack,
-      assistantId: assistant.id,
       createdAt: new Date().toISOString(),
-      status: 'pending'
-    });
-
-    // Start VAPI call workflow
-    const call = await vapiService.createCall({
-      assistant_id: assistant.id!,
-      workflow: {
-        id: "interview_workflow",
-        data: {
-          type: params.type,
-          role: params.role,
-          techstack: params.techstack,
-          resumeContent: resumeContent
-        }
-      }
-    });
-
-    // Update interview with call ID
-    await interviewRef.update({
-      callId: call.id
+      status: 'pending',
+      vapiFileId: userData?.vapiFileId,
+      vapiKnowledgeBaseId: userData?.vapiKnowledgeBaseId,
+      vapiAssistantId: process.env.VAPI_ASSISTANT_ID
     });
 
     return {
       success: true,
-      interviewId: interviewRef.id,
-      callId: call.id
+      interviewId: interviewRef.id
     };
   } catch (error) {
     console.error('Error creating interview:', error);
@@ -91,12 +74,8 @@ export async function createFeedback(params: CreateFeedbackParams) {
     let resumeContent = null;
     
     if (userData?.vapiFileId) {
-      try {
-        const content = await vapiService.getFileContent(userData.vapiFileId);
-        resumeContent = content.text;
-      } catch (error) {
-        console.error('Error retrieving resume:', error);
-      }
+      const fileData = await getVapiFile(userData.vapiFileId);
+      resumeContent = fileData?.text;
     }
 
     const formattedTranscript = transcript
@@ -112,23 +91,19 @@ export async function createFeedback(params: CreateFeedbackParams) {
       }),
       schema: feedbackSchema,
       prompt: `
-        You are an AI interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories and their resume.
-        
-        ${resumeContent ? 'Resume Content:\n' + resumeContent + '\n\n' : ''}
-        
-        Interview Transcript:
+        You are an AI interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories. Be thorough and detailed in your analysis. Don't be lenient with the candidate. If there are mistakes or areas for improvement, point them out.
+        Transcript:
         ${formattedTranscript}
 
-        Please analyze the candidate's responses in relation to their resume and experience. Score them from 0 to 100 in these areas:
+        Please score the candidate from 0 to 100 in the following areas. Do not add categories other than the ones provided:
         - **Communication Skills**: Clarity, articulation, structured responses.
         - **Technical Knowledge**: Understanding of key concepts for the role.
         - **Problem-Solving**: Ability to analyze problems and propose solutions.
         - **Cultural & Role Fit**: Alignment with company values and job role.
         - **Confidence & Clarity**: Confidence in responses, engagement, and clarity.
-        
-        ${resumeContent ? 'Consider how well their interview responses align with their stated experience and skills in their resume.' : ''}
-      `,
-      system: "You are a professional interviewer analyzing a mock interview and comparing responses against the candidate's resume",
+        `,
+      system:
+        "You are a professional interviewer analyzing a mock interview. Your task is to evaluate the candidate based on structured categories",
     });
 
     const feedback = {
@@ -154,8 +129,8 @@ export async function createFeedback(params: CreateFeedbackParams) {
 
     return { success: true, feedbackId: feedbackRef.id };
   } catch (error) {
-    console.error('Error creating feedback:', error);
-    throw error;
+    console.error("Error saving feedback:", error);
+    return { success: false };
   }
 }
 

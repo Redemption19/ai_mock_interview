@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import cloudinary from '@/lib/cloudinary';
-import { vapi, vapiService } from "@/lib/vapi.sdk";
+import { v2 as cloudinary } from 'cloudinary';
+import Vapi from '@vapi-ai/web';
 
 // Configure Cloudinary
 cloudinary.config({
@@ -9,17 +9,158 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-export async function POST(request: Request) {
+// Initialize VAPI with web token for other operations
+const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN!);
+
+async function getOrCreateAssistant(knowledgeBaseId: string) {
   try {
-    const formData = await request.formData();
+    // First, try to get existing assistant
+    const assistantId = process.env.VAPI_ASSISTANT_ID; // Store this in your .env
+    if (assistantId) {
+      const getResponse = await fetch(`https://api.vapi.ai/assistant/${assistantId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${process.env.VAPI_PRIVATE_KEY}`
+        }
+      });
+
+      if (getResponse.ok) {
+        // Update existing assistant with new knowledge base
+        const updateResponse = await fetch(`https://api.vapi.ai/assistant/${assistantId}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${process.env.VAPI_PRIVATE_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            tools: [{
+              type: 'knowledge_base',
+              knowledge_base_id: knowledgeBaseId
+            }]
+          })
+        });
+
+        if (updateResponse.ok) {
+          const assistantData = await updateResponse.json();
+          return assistantData.id;
+        }
+      }
+    }
+
+    // If no existing assistant or update failed, create new one
+    const createResponse = await fetch('https://api.vapi.ai/assistant', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.VAPI_PRIVATE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: 'Interview Assistant',
+        model: 'gpt-4',
+        tools: [{
+          type: 'knowledge_base',
+          knowledge_base_id: knowledgeBaseId
+        }],
+        instructions: 'You are an AI interviewer. Use the candidate\'s resume to ask relevant questions about their experience.'
+      })
+    });
+
+    if (!createResponse.ok) {
+      throw new Error('Failed to create assistant');
+    }
+
+    const newAssistantData = await createResponse.json();
+    return newAssistantData.id;
+  } catch (error) {
+    console.error('Assistant error:', error);
+    throw error;
+  }
+}
+
+async function uploadToVapi(buffer: Buffer, fileName: string, fileType: string) {
+  try {
+    // 1. Upload file
+    const formData = new FormData();
+    const blob = new Blob([buffer], { type: fileType });
+    formData.append('file', blob, fileName);
+
+    const fileResponse = await fetch('https://api.vapi.ai/file', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.VAPI_PRIVATE_KEY}`
+      },
+      body: formData
+    });
+
+    if (!fileResponse.ok) {
+      throw new Error(`File upload failed: ${await fileResponse.text()}`);
+    }
+
+    const fileData = await fileResponse.json();
+    const fileId = fileData.id;
+
+    // 2. Create knowledge base
+    const kbResponse = await fetch('https://api.vapi.ai/knowledge-base', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.VAPI_PRIVATE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: `Resume_${fileName}`,
+        files: [fileId],
+        description: 'Resume knowledge base for interview preparation'
+      })
+    });
+
+    if (!kbResponse.ok) {
+      throw new Error(`Knowledge base creation failed: ${await kbResponse.text()}`);
+    }
+
+    const kbData = await kbResponse.json();
+    const knowledgeBaseId = kbData.id;
+
+    // 3. Update or create assistant with knowledge base
+    const assistantId = process.env.VAPI_ASSISTANT_ID;
+    if (assistantId) {
+      const updateResponse = await fetch(`https://api.vapi.ai/assistant/${assistantId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${process.env.VAPI_PRIVATE_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          tools: [{
+            type: 'knowledge_base',
+            knowledge_base_id: knowledgeBaseId
+          }]
+        })
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error(`Assistant update failed: ${await updateResponse.text()}`);
+      }
+    }
+
+    return {
+      url: fileData.url,
+      fileId,
+      knowledgeBaseId
+    };
+  } catch (error) {
+    console.error('VAPI integration error:', error);
+    throw error;
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const formData = await req.formData();
     const file = formData.get('file') as File;
-    const type = formData.get('type') as 'profile' | 'resume';
+    const type = formData.get('type') as string;
 
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
     // Validate resume file type
@@ -38,57 +179,48 @@ export async function POST(request: Request) {
       }
     }
 
-    // Convert file to base64
+    // Convert file to buffer
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const base64String = buffer.toString('base64');
-    const dataURI = `data:${file.type};base64,${base64String}`;
 
-    // Upload to Cloudinary
-    const uploadOptions: any = {
+    // Upload to Cloudinary first
+    const dataURI = `data:${file.type};base64,${buffer.toString('base64')}`;
+    const cloudinaryResult = await cloudinary.uploader.upload(dataURI, {
       folder: type === 'profile' ? 'profile-pictures' : 'resumes',
       resource_type: type === 'profile' ? 'image' : 'raw',
-    };
+      format: type === 'resume' ? 'pdf' : undefined,
+      tags: type === 'resume' ? ['resume'] : undefined,
+    });
 
-    if (type === 'resume') {
-      uploadOptions.format = 'pdf';
-      uploadOptions.tags = ['resume'];
-    }
-
-    const cloudinaryResult = await cloudinary.uploader.upload(dataURI, uploadOptions);
-
-    // If it's a resume, also upload to VAPI
+    // If it's a resume, upload to VAPI and create knowledge base
     let vapiFileId = null;
+    let vapiKnowledgeBaseId = null;
     if (type === 'resume') {
       try {
-        const vapiResponse = await vapi.uploadFile(
-          base64String,
-          file.name,
-          file.type
+        const vapiData = await uploadToVapi(buffer, file.name, file.type);
+        vapiFileId = vapiData.fileId;
+        vapiKnowledgeBaseId = vapiData.knowledgeBaseId;
+      } catch (error: any) {
+        return NextResponse.json(
+          { error: error?.message || 'Failed to upload to VAPI' },
+          { status: 500 }
         );
-        vapiFileId = vapiResponse.fileId;
-      } catch (vapiError) {
-        console.error('VAPI upload error:', vapiError);
       }
     }
 
     return NextResponse.json({
-      success: true,
       url: cloudinaryResult.secure_url,
-      format: cloudinaryResult.format,
-      vapiFileId
+      vapiFileId,
+      vapiKnowledgeBaseId
     });
-
-  } catch (error) {
-    console.error('Upload error:', error);
+  } catch (error: any) {
     return NextResponse.json(
-      { error: 'Failed to upload file' },
+      { error: error?.message || 'Upload failed' },
       { status: 500 }
     );
   }
 }
 
-// Increase payload size limit
 export const config = {
   api: {
     bodyParser: {

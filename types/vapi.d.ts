@@ -1,94 +1,137 @@
-enum MessageTypeEnum {
-  TRANSCRIPT = "transcript",
-  FUNCTION_CALL = "function-call",
-  FUNCTION_CALL_RESULT = "function-call-result",
-  ADD_MESSAGE = "add-message",
-}
-
-enum MessageRoleEnum {
-  USER = "user",
-  SYSTEM = "system",
-  ASSISTANT = "assistant",
-}
-
-enum TranscriptMessageTypeEnum {
-  PARTIAL = "partial",
-  FINAL = "final",
-}
-
-interface BaseMessage {
-  type: MessageTypeEnum;
-}
-
-interface TranscriptMessage extends BaseMessage {
-  type: MessageTypeEnum.TRANSCRIPT;
-  role: MessageRoleEnum;
-  transcriptType: TranscriptMessageTypeEnum;
-  transcript: string;
-}
-
-interface FunctionCallMessage extends BaseMessage {
-  type: MessageTypeEnum.FUNCTION_CALL;
-  functionCall: {
-    name: string;
-    parameters: unknown;
-  };
-}
-
-interface FunctionCallResultMessage extends BaseMessage {
-  type: MessageTypeEnum.FUNCTION_CALL_RESULT;
-  functionCallResult: {
-    forwardToClientEnabled?: boolean;
-    result: unknown;
-    [a: string]: unknown;
-  };
-}
-
-type Message =
-  | TranscriptMessage
-  | FunctionCallMessage
-  | FunctionCallResultMessage;
-
 declare module "@vapi-ai/web" {
-  interface CreateAssistantDTO {
-    assistantId?: string;
-    name?: string;
-    model?: string;
-    systemPrompt?: string;
-    options?: any;
-    [key: string]: any;
+  enum MessageTypeEnum {
+    TRANSCRIPT = "transcript",
+    FUNCTION_CALL = "function-call",
+    FUNCTION_CALL_RESULT = "function-call-result",
+    ADD_MESSAGE = "add-message",
   }
 
-  interface CallOptions {
-    assistantId: string;
-    options?: any;
+  enum MessageRoleEnum {
+    USER = "user",
+    SYSTEM = "system",
+    ASSISTANT = "assistant",
   }
 
-  interface FileContent {
-    text: string;
-    [key: string]: any;
+  enum TranscriptMessageTypeEnum {
+    PARTIAL = "partial",
+    FINAL = "final",
   }
 
-  export default class Vapi {
+  interface BaseMessage {
+    type: MessageTypeEnum;
+  }
+
+  interface TranscriptMessage extends BaseMessage {
+    type: MessageTypeEnum.TRANSCRIPT;
+    role: MessageRoleEnum;
+    transcriptType: TranscriptMessageTypeEnum;
+    transcript: string;
+  }
+
+  interface FunctionCallMessage extends BaseMessage {
+    type: MessageTypeEnum.FUNCTION_CALL;
+    functionCall: {
+      name: string;
+      parameters: unknown;
+    };
+  }
+
+  interface FunctionCallResultMessage extends BaseMessage {
+    type: MessageTypeEnum.FUNCTION_CALL_RESULT;
+    functionCallResult: {
+      forwardToClientEnabled?: boolean;
+      result: unknown;
+      [a: string]: unknown;
+    };
+  }
+
+  type Message =
+    | TranscriptMessage
+    | FunctionCallMessage
+    | FunctionCallResultMessage;
+
+  export interface VapiService {
+    createAssistant(params: {
+      name: string;
+      model: string;
+      tools: Array<{
+        type: string;
+        knowledge_base_id?: string;
+      }>;
+      instructions: string;
+    }): Promise<{ id: string }>;
+
+    createCall(params: {
+      assistant_id: string;
+      workflow?: {
+        id: string;
+        data: Record<string, any>;
+      };
+    }): Promise<{ id: string }>;
+
+    getFileContent(fileId: string): Promise<{ text: string }>;
+  }
+
+  export default class Vapi implements VapiService {
     constructor(token: string);
     
-    // Event handlers
-    on(event: string, callback: (...args: any[]) => void): void;
-    off(event: string, callback: (...args: any[]) => void): void;
-    
-    // Call methods
-    start(assistantId: string, options?: any): Promise<void>;
+    files: {
+      create(file: Buffer | ReadableStream): Promise<{ id: string }>;
+      get(id: string): Promise<{ text: string }>;
+    };
+
+    on(event: string, callback: (message: any) => void): void;
+    off(event: string, callback: (message: any) => void): void;
+    start(workflowIdOrAssistant: string | any, options?: { variableValues?: Record<string, any> }): Promise<void>;
     stop(): Promise<void>;
+
+    createAssistant(params: {
+      name: string;
+      model: string;
+      tools: Array<{
+        type: string;
+        knowledge_base_id?: string;
+      }>;
+      instructions: string;
+    }): Promise<{ id: string }>;
+
+    createCall(params: {
+      assistant_id: string;
+      workflow?: {
+        id: string;
+        data: Record<string, any>;
+      };
+    }): Promise<{ id: string }>;
     
-    // Assistant methods
-    createAssistant(params: CreateAssistantDTO): Promise<any>;
-    createCall(assistantId: string, options?: any): Promise<any>;
-    
-    // File methods
-    uploadFile(file: string | Buffer, options?: any): Promise<any>;
-    getFileContent(fileId: string): Promise<FileContent>;
+    getFileContent(fileId: string): Promise<{ text: string }>;
+
+    uploadFile(params: {
+      file: string;
+      fileName: string;
+      mimeType: string;
+    }): Promise<{ id: string }>;
   }
 }
 
-// Export a helper type for the service
+declare module "@vapi/server-sdk" {
+  interface VapiClientOptions {
+    token: string;
+  }
+
+  interface VapiFile {
+    id: string;
+    text: string;
+  }
+
+  export class VapiClient {
+    constructor(options: VapiClientOptions);
+    
+    files: {
+      create(file: Buffer | ReadableStream): Promise<{ id: string }>;
+      get(id: string): Promise<VapiFile>;
+    };
+  }
+}
+
+// Export type for the service
 export interface VapiService extends Vapi {}

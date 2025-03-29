@@ -306,6 +306,30 @@
       @apply text-sm font-semibold capitalize;
     }
   }
+
+  .interview-controls {
+    @apply flex items-center justify-center gap-4 w-full;
+  }
+
+  .btn-camera {
+    @apply inline-block px-7 py-3 font-bold text-sm leading-5 text-white transition-colors duration-150 bg-primary-100 border border-transparent rounded-full shadow-sm focus:outline-none focus:shadow-2xl active:bg-primary-200 hover:bg-primary-200 min-w-28 cursor-pointer;
+  }
+
+  .video-container {
+    @apply w-full max-h-[300px] rounded-lg overflow-hidden flex items-center justify-center;
+  }
+
+  .video-stream {
+    @apply rounded-lg w-full h-full object-cover;
+  }
+
+  .card-content {
+    @apply flex flex-col items-center justify-center p-7 dark-gradient rounded-2xl min-h-full w-full;
+  }
+
+  .card-border {
+    @apply border-gradient p-0.5 rounded-2xl flex-1 sm:basis-1/2 w-full h-[400px];
+  }
 }
 
 @utility dark-gradient {

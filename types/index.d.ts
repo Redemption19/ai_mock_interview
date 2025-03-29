@@ -92,6 +92,7 @@ interface SignUpParams {
   resumeURL?: string;
   resumeText?: string;
   vapiFileId?: string;
+  vapiKnowledgeBaseId?: string;
 }
 
 type FormType = "sign-in" | "sign-up";

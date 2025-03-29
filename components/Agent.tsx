@@ -1,10 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { Mic, Phone } from "lucide-react";
+import Webcam from "react-webcam";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
@@ -23,6 +22,23 @@ interface SavedMessage {
   content: string;
 }
 
+interface AgentProps {
+  userName: string;
+  userId?: string;
+  interviewId?: string;
+  feedbackId?: string;
+  type: "generate" | "interview";
+  questions?: string[];
+  profileURL?: string;
+}
+
+type Message = {
+  role: "user" | "system" | "assistant";
+  type: string;
+  transcriptType: string;
+  transcript: string;
+};
+
 const Agent = ({
   userName,
   userId,
@@ -30,13 +46,20 @@ const Agent = ({
   feedbackId,
   type,
   questions,
+  profileURL,
 }: AgentProps) => {
   const router = useRouter();
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
   const [messages, setMessages] = useState<SavedMessage[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [lastMessage, setLastMessage] = useState<string>("");
-  const [isCallActive, setIsCallActive] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+
+  const videoConstraints = {
+    width: 1280,
+    height: 720,
+    facingMode: "user"
+  };
 
   useEffect(() => {
     const onCallStart = () => {
@@ -64,14 +87,8 @@ const Agent = ({
       setIsSpeaking(false);
     };
 
-    const handleTranscript = (transcript: string) => {
-      // Handle transcript
-    };
-
-    const handleError = (error: any) => {
-      console.error("Call error:", error);
-      toast.error("Call error occurred");
-      setIsCallActive(false);
+    const onError = (error: Error) => {
+      console.log("Error:", error);
     };
 
     vapi.on("call-start", onCallStart);
@@ -79,12 +96,7 @@ const Agent = ({
     vapi.on("message", onMessage);
     vapi.on("speech-start", onSpeechStart);
     vapi.on("speech-end", onSpeechEnd);
-    vapi.on("transcript", handleTranscript);
-    vapi.on("error", handleError);
-    vapi.on("callEnd", () => setIsCallActive(false));
-    vapi.on("assistantEnd", () => setIsCallActive(false));
-    vapi.on("disconnect", () => setIsCallActive(false));
-    vapi.on("timeout", () => setIsCallActive(false));
+    vapi.on("error", onError);
 
     return () => {
       vapi.off("call-start", onCallStart);
@@ -92,12 +104,7 @@ const Agent = ({
       vapi.off("message", onMessage);
       vapi.off("speech-start", onSpeechStart);
       vapi.off("speech-end", onSpeechEnd);
-      vapi.off("transcript", handleTranscript);
-      vapi.off("error", handleError);
-      vapi.off("callEnd", () => setIsCallActive(false));
-      vapi.off("assistantEnd", () => setIsCallActive(false));
-      vapi.off("disconnect", () => setIsCallActive(false));
-      vapi.off("timeout", () => setIsCallActive(false));
+      vapi.off("error", onError);
     };
   }, []);
 
@@ -134,48 +141,54 @@ const Agent = ({
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   const handleCall = async () => {
-    try {
-      setIsCallActive(true);
-      setCallStatus(CallStatus.CONNECTING);
+    setCallStatus(CallStatus.CONNECTING);
 
-      if (type === "generate") {
-        await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
-          variableValues: {
-            username: userName,
-            userid: userId,
-          },
-        });
-      } else {
-        let formattedQuestions = "";
-        if (questions) {
-          formattedQuestions = questions
-            .map((question) => `- ${question}`)
-            .join("\n");
-        }
-
-        await vapi.start(interviewer, {
-          variableValues: {
-            questions: formattedQuestions,
-          },
-        });
+    if (type === "generate") {
+      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
+        variableValues: {
+          username: userName,
+          userid: userId,
+        },
+      });
+    } else {
+      let formattedQuestions = "";
+      if (questions) {
+        formattedQuestions = questions
+          .map((question) => `- ${question}`)
+          .join("\n");
       }
-    } catch (error) {
-      console.error("Call error:", error);
-      toast.error("Failed to start call");
-      setIsCallActive(false);
+
+      await vapi.start(interviewer, {
+        variableValues: {
+          questions: formattedQuestions,
+        },
+      });
     }
   };
 
-  const handleDisconnect = async () => {
-    try {
-      await vapi.stop();
-      setIsCallActive(false);
-      setCallStatus(CallStatus.FINISHED);
-    } catch (error) {
-      console.error("Error ending call:", error);
-      toast.error("Failed to end call");
-    }
+  const handleDisconnect = () => {
+    setCallStatus(CallStatus.FINISHED);
+    vapi.stop();
   };
+
+  const toggleVideo = () => {
+    setIsVideoEnabled(!isVideoEnabled);
+  };
+
+  const handleWebcamError = useCallback((err: string | DOMException) => {
+    console.error('Webcam error:', err);
+    setIsVideoEnabled(false);
+    alert('Could not access camera. Please make sure you have granted camera permissions.');
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      // Cleanup video when component unmounts
+      if (isVideoEnabled) {
+        setIsVideoEnabled(false);
+      }
+    };
+  }, []);
 
   return (
     <>
@@ -198,14 +211,26 @@ const Agent = ({
         {/* User Profile Card */}
         <div className="card-border">
           <div className="card-content">
-            <Image
-              src="/user-avatar.png"
-              alt="profile-image"
-              width={539}
-              height={539}
-              className="rounded-full object-cover size-[120px]"
-            />
-            <h3>{userName}</h3>
+            {isVideoEnabled ? (
+              <div className="video-container">
+                <Webcam
+                  audio={false}
+                  mirrored={true}
+                  videoConstraints={videoConstraints}
+                  className="video-stream"
+                  onUserMediaError={handleWebcamError}
+                />
+              </div>
+            ) : (
+              <Image
+                src={profileURL || "/user-avatar.png"}
+                alt="profile-image"
+                width={539}
+                height={539}
+                className="rounded-full object-cover size-[120px]"
+              />
+            )}
+            <h3 className="mt-4">{userName}</h3>
           </div>
         </div>
       </div>
@@ -226,16 +251,22 @@ const Agent = ({
         </div>
       )}
 
-      <div className="w-full flex justify-center">
+      <div className="interview-controls">
+        <button
+          onClick={toggleVideo}
+          className="btn-camera"
+        >
+          {isVideoEnabled ? 'Turn Off Camera' : 'Turn On Camera'}
+        </button>
+
         {callStatus !== "ACTIVE" ? (
-          <button className="relative btn-call" onClick={() => handleCall()}>
+          <button className="btn-call" onClick={() => handleCall()}>
             <span
               className={cn(
                 "absolute animate-ping rounded-full opacity-75",
                 callStatus !== "CONNECTING" && "hidden"
               )}
             />
-
             <span className="relative">
               {callStatus === "INACTIVE" || callStatus === "FINISHED"
                 ? "Call"

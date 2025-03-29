@@ -46,29 +46,37 @@ export const getRandomInterviewCover = () => {
   return `/covers${interviewCovers[randomIndex]}`;
 };
 
-export async function uploadToCloudinary(file: File, type: 'profile' | 'resume'): Promise<string> {
+export async function uploadToCloudinary(file: File, type: 'profile' | 'resume'): Promise<{ url: string; vapiFileId?: string }> {
   try {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('type', type);
+
+    console.log('Uploading file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
 
     const response = await fetch('/api/upload', {
       method: 'POST',
       body: formData,
     });
 
-    if (!response.ok) {
-      const errorData = await response.text();
-      throw new Error(`Upload failed: ${errorData}`);
-    }
-
     const data = await response.json();
     
-    if (!data.url) {
-      throw new Error('No URL returned from upload');
+    if (!response.ok) {
+      throw new Error(data.error || 'Upload failed');
     }
 
-    return data.url;
+    if (type === 'resume' && !data.vapiFileId) {
+      throw new Error('Failed to get VAPI file ID');
+    }
+
+    return {
+      url: data.url,
+      vapiFileId: data.vapiFileId
+    };
   } catch (error) {
     console.error(`${type} upload error:`, error);
     throw error;

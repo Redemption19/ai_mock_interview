@@ -12,8 +12,18 @@ export const vapiService = new VapiService();
 
 export async function getResumeContent(fileId: string) {
   try {
-    const content = await vapi.getFileContent(fileId);
-    return content.text;
+    const response = await fetch(`https://api.vapi.ai/file/${fileId}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN}`,
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch file');
+    }
+
+    const data = await response.json();
+    return data.text;
   } catch (error) {
     console.error('Error retrieving resume content:', error);
     return null;

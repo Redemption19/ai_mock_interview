@@ -41,6 +41,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
   const [profileFile, setProfileFile] = useState<File | null>(null);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [isUploadingResume, setIsUploadingResume] = useState(false);
+  const [isUploadingToVapi, setIsUploadingToVapi] = useState(false);
 
   const formSchema = authFormSchema(type);
   const form = useForm<z.infer<typeof formSchema>>({
@@ -64,24 +65,32 @@ const AuthForm = ({ type }: { type: FormType }) => {
           password
         );
 
-        let profileURL, resumeURL, resumeText;
+        let profileURL, resumeURL, resumeText, vapiFileId;
         
         if (profileFile) {
-          try {
-            profileURL = await uploadToCloudinary(profileFile, 'profile');
-          } catch (error) {
-            console.error('Profile upload error:', error);
-            toast.error('Failed to upload profile picture');
-          }
+          const { url } = await uploadToCloudinary(profileFile, 'profile');
+          profileURL = url;
         }
 
         if (resumeFile) {
           try {
-            resumeURL = await uploadToCloudinary(resumeFile, 'resume');
+            setIsUploadingResume(true);
+            console.log('Starting resume upload:', resumeFile.name);
+            
+            const { url: resumeUrl, vapiFileId: fileId } = await uploadToCloudinary(resumeFile, 'resume');
+            console.log('Upload successful:', { resumeUrl, vapiFileId: fileId });
+            
+            resumeURL = resumeUrl;
             resumeText = await parseResume(resumeFile);
-          } catch (error) {
+            vapiFileId = fileId;
+
+            toast.success('Resume uploaded successfully');
+          } catch (error: any) {
             console.error('Resume upload error:', error);
-            toast.error('Failed to upload resume');
+            toast.error(error.message || 'Failed to upload resume');
+            return;
+          } finally {
+            setIsUploadingResume(false);
           }
         }
 
@@ -92,6 +101,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
           profileURL,
           resumeURL,
           resumeText,
+          vapiFileId,
         });
 
         if (!result.success) {
@@ -103,7 +113,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
         router.push("/sign-in");
       } else {
         const { email, password } = data;
-        
+
         const userCredential = await signInWithEmailAndPassword(
           auth,
           email,
@@ -111,7 +121,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
         );
 
         const idToken = await userCredential.user.getIdToken();
-        
+
         const result = await signIn({
           email,
           idToken,
@@ -261,10 +271,12 @@ const AuthForm = ({ type }: { type: FormType }) => {
                     onClick={() => !isUploadingResume && document.getElementById("resume-upload")?.click()}
                   >
                     <div className="flex items-center gap-1.5">
-                      {isUploadingResume ? (
+                      {isUploadingResume || isUploadingToVapi ? (
                         <>
                           <Spinner className="border-primary-100" />
-                          <span className="text-sm sm:text-base">Uploading...</span>
+                          <span className="text-sm sm:text-base">
+                            {isUploadingToVapi ? "Uploading to VAPI..." : "Preparing upload..."}
+                          </span>
                         </>
                       ) : (
                         <>
@@ -331,8 +343,8 @@ const AuthForm = ({ type }: { type: FormType }) => {
                   <label className="label">Email</label>
                   <Input
                     {...form.register("email")}
-                    placeholder="Your email address"
-                    type="email"
+              placeholder="Your email address"
+              type="email"
                     className="input"
                   />
                 </div>
@@ -342,7 +354,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
                   <Input
                     {...form.register("password")}
                     type="password"
-                    placeholder="Enter your password"
+              placeholder="Enter your password"
                     className="input"
                   />
                 </div>

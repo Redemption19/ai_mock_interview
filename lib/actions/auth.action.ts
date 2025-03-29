@@ -33,7 +33,8 @@ export async function signUp(params: SignUpParams) {
     profileURL, 
     resumeURL, 
     resumeText, 
-    vapiFileId 
+    vapiFileId,
+    vapiKnowledgeBaseId 
   } = params;
 
   try {
@@ -52,8 +53,12 @@ export async function signUp(params: SignUpParams) {
       resumeURL: resumeURL || null,
       resumeText: resumeText || null,
       vapiFileId: vapiFileId || null,
+      vapiKnowledgeBaseId: vapiKnowledgeBaseId || null,
       createdAt: new Date().toISOString(),
     });
+
+    // No need to verify VAPI file here since the upload is already handled
+    // by the uploadToCloudinary function which includes VAPI upload verification
 
     return {
       success: true,

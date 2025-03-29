@@ -54,6 +54,7 @@ const InterviewDetails = async ({ params }: RouteParams) => {
         type="interview"
         questions={interview.questions}
         feedbackId={feedback?.id}
+        profileURL={user?.profileURL || ""}
       />
     </>
   );
