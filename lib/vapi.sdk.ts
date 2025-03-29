@@ -1,6 +1,6 @@
 import Vapi from "@vapi-ai/web";
 
-// Export the VAPI instance directly as before
+// Initialize VAPI with just the token
 export const vapi = new Vapi(process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN!);
 
 // Keep the service for additional functionality if needed

@@ -63,11 +63,16 @@ const Agent = ({
 
   useEffect(() => {
     const onCallStart = () => {
+      console.log('Call started');
       setCallStatus(CallStatus.ACTIVE);
     };
 
     const onCallEnd = () => {
+      console.log('Call ended');
       setCallStatus(CallStatus.FINISHED);
+      if (isVideoEnabled) {
+        setIsVideoEnabled(false);
+      }
     };
 
     const onMessage = (message: Message) => {
@@ -88,7 +93,16 @@ const Agent = ({
     };
 
     const onError = (error: Error) => {
-      console.log("Error:", error);
+      console.error("VAPI Error:", error);
+      setCallStatus(CallStatus.INACTIVE);
+      alert('The call encountered an error. Please try again.');
+    };
+
+    // Add error handling for unexpected disconnections
+    const handleVisibilityChange = () => {
+      if (document.hidden && callStatus === CallStatus.ACTIVE) {
+        handleDisconnect();
+      }
     };
 
     vapi.on("call-start", onCallStart);
@@ -97,6 +111,7 @@ const Agent = ({
     vapi.on("speech-start", onSpeechStart);
     vapi.on("speech-end", onSpeechEnd);
     vapi.on("error", onError);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       vapi.off("call-start", onCallStart);
@@ -105,8 +120,13 @@ const Agent = ({
       vapi.off("speech-start", onSpeechStart);
       vapi.off("speech-end", onSpeechEnd);
       vapi.off("error", onError);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      
+      if (callStatus === CallStatus.ACTIVE) {
+        vapi.stop();
+      }
     };
-  }, []);
+  }, [callStatus, isVideoEnabled]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -141,35 +161,77 @@ const Agent = ({
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   const handleCall = async () => {
-    setCallStatus(CallStatus.CONNECTING);
+    try {
+      setCallStatus(CallStatus.CONNECTING);
 
-    if (type === "generate") {
-      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
-        variableValues: {
-          username: userName,
-          userid: userId,
-        },
-      });
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
+      // Make sure VAPI is properly initialized
+      if (!vapi) {
+        throw new Error('VAPI not initialized');
       }
 
-      await vapi.start(interviewer, {
-        variableValues: {
-          questions: formattedQuestions,
-        },
-      });
+      if (type === "generate") {
+        if (!process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID) {
+          throw new Error('VAPI workflow ID not configured');
+        }
+
+        await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID, {
+          variableValues: {
+            username: userName,
+            userid: userId,
+          },
+        });
+      } else {
+        let formattedQuestions = "";
+        if (questions) {
+          formattedQuestions = questions
+            .map((question) => `- ${question}`)
+            .join("\n");
+        }
+
+        await vapi.start(interviewer, {
+          variableValues: {
+            questions: formattedQuestions,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Call initialization error:', error);
+      setCallStatus(CallStatus.INACTIVE);
+      alert('Failed to start the interview. Please try again.');
     }
   };
 
   const handleDisconnect = () => {
-    setCallStatus(CallStatus.FINISHED);
-    vapi.stop();
+    try {
+      setCallStatus(CallStatus.FINISHED);
+      if (isVideoEnabled) {
+        setIsVideoEnabled(false);
+      }
+      vapi.stop();
+    } catch (error) {
+      console.error('Error during disconnect:', error);
+      // Force status reset even if error occurs
+      setCallStatus(CallStatus.INACTIVE);
+    }
   };
+
+  // Add reconnection logic
+  useEffect(() => {
+    const handleReconnection = async () => {
+      if (callStatus === CallStatus.ACTIVE && !navigator.onLine) {
+        handleDisconnect();
+        alert('Lost connection. Please try starting the interview again.');
+      }
+    };
+
+    window.addEventListener('online', handleReconnection);
+    window.addEventListener('offline', handleReconnection);
+
+    return () => {
+      window.removeEventListener('online', handleReconnection);
+      window.removeEventListener('offline', handleReconnection);
+    };
+  }, [callStatus]);
 
   const toggleVideo = () => {
     setIsVideoEnabled(!isVideoEnabled);
