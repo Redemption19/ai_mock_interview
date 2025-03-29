@@ -32,7 +32,7 @@ async function Home() {
       const feedbacksRef = collection(db, "feedbacks");
       const q = query(
         feedbacksRef,
-        where("userId", "==", user?.id || null),
+        where("userId", "==", user?.id ?? null),
         orderBy("createdAt", "desc")
       );
       
