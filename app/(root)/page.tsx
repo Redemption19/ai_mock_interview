@@ -10,6 +10,12 @@ import {
   getLatestInterviews,
 } from "@/lib/actions/general.action";
 
+import { db } from "@/firebase/client";
+import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
+
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+
 async function Home() {
   const user = await getCurrentUser();
 
@@ -20,6 +26,29 @@ async function Home() {
 
   const hasPastInterviews = userInterviews?.length! > 0;
   const hasUpcomingInterviews = allInterview?.length! > 0;
+
+  const getFeedbacks = async () => {
+    try {
+      const feedbacksRef = collection(db, "feedbacks");
+      const q = query(
+        feedbacksRef,
+        where("userId", "==", user?.id || null),
+        orderBy("createdAt", "desc")
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const feedbacks: any[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        feedbacks.push({ id: doc.id, ...doc.data() });
+      });
+      
+      return feedbacks;
+    } catch (error) {
+      console.error("Error getting feedbacks:", error);
+      return [];
+    }
+  };
 
   return (
     <>
