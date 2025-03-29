@@ -2,6 +2,7 @@ import Agent from "@/components/Agent";
 import { getCurrentUser } from "@/lib/actions/auth.action";
 
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 const Page = async () => {
   const user = await getCurrentUser();

@@ -14,7 +14,7 @@ import { db } from "@/firebase/client";
 import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
 
 export const dynamic = 'force-dynamic'
-export const fetchCache = 'force-no-store'
+export const revalidate = 0
 
 async function Home() {
   const user = await getCurrentUser();

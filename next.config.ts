@@ -22,6 +22,14 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  staticPageGenerationTimeout: 1000,
+  output: 'standalone',
+  serverRuntimeConfig: {
+    mySecret: 'secret',
+  },
+  publicRuntimeConfig: {
+    staticFolder: '/static',
+  },
 };
 
 export default nextConfig;
